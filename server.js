@@ -1,4 +1,3 @@
-# Wrote interview-practice-online\server.js
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -231,7 +230,7 @@ io.on('connection', (socket) => {
         if (candidate.muted) {
             return callback({ success: false, error: '已被禁言' });
         }
-        if (candidate.status !== 'waiting') {
+        if (candidate.status !== 'waiting' && candidate.status !== 'answering') {
             return callback({ success: false, error: '当前不是你的答题时间' });
         }
         room.candidates.forEach((c, i) => {
@@ -328,8 +327,12 @@ io.on('connection', (socket) => {
             }
         });
         room.currentQuestion = room.questions[room.questionIndex];
+        room.timeLeft = room.timerDuration;
+        
         io.to(user.roomId).emit('roomUpdate', serializeRoom(room));
         io.to(user.roomId).emit('candidateChange', { nextCandidate: room.candidates[room.currentIndex].name, question: room.currentQuestion });
+        
+        startTimer(room);
         if (callback) callback({ success: true, finished: false });
     });
     socket.on('toggleMute', (data, callback) => {
