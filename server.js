@@ -1,9 +1,10 @@
+# Wrote interview-practice-online\server.js
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
-
+const fs = require('fs');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -12,117 +13,195 @@ const io = new Server(server, {
         methods: ["GET", "POST"]
     }
 });
-
+app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
-
+const DATA_FILE = path.join(__dirname, 'data.json');
+function loadData() {
+    try {
+        if (fs.existsSync(DATA_FILE)) {
+            return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+        }
+    } catch (e) {}
+    return { users: [], rooms: [], questions: [] };
+}
+function saveData(data) {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+}
+let data = loadData();
+const DEFAULT_QUESTIONS = [
+    { id: 1, title: "请自我介绍并谈谈你的优势", desc: "请用2-3分钟时间进行自我介绍，并阐述你为什么适合这个岗位。", image: "https://picsum.photos/600/400?random=1", category: "自我介绍" },
+    { id: 2, title: "请描述你最大的缺点", desc: "谈谈你的不足之处，以及你正在如何改进。", image: "https://picsum.photos/600/400?random=2", category: "自我认知" },
+    { id: 3, title: "你为什么想加入我们公司", desc: "请说明你选择我们公司的原因以及你的职业规划。", image: "https://picsum.photos/600/400?random=3", category: "求职动机" },
+    { id: 4, title: "请举例说明你解决困难的经验", desc: "描述一次你面对挑战并成功解决问题的经历。", image: "https://picsum.photos/600/400?random=4", category: "经验问题" },
+    { id: 5, title: "你的期望薪资是多少", desc: "谈谈你的薪酬期望以及理由。", image: "https://picsum.photos/600/400?random=5", category: "薪资问题" },
+    { id: 6, title: "请谈谈你的职业规划", desc: "未来3-5年你有什么职业目标？", image: "https://picsum.photos/600/400?random=6", category: "职业规划" },
+    { id: 7, title: "你为什么离职", desc: "请说明上一份工作的离职原因。", image: "https://picsum.photos/600/400?random=7", category: "离职原因" },
+    { id: 8, title: "你最大的成就是什么", desc: "请分享一个你最有成就感的事情。", image: "https://picsum.photos/600/400?random=8", category: "成就事件" }
+];
+if (data.questions.length === 0) {
+    data.questions = [...DEFAULT_QUESTIONS];
+    saveData(data);
+}
 const rooms = new Map();
 const users = new Map();
-
-const DEFAULT_QUESTIONS = [
-    { id: 1, title: "请自我介绍并谈谈你的优势", desc: "请用2-3分钟时间进行自我介绍，并阐述你为什么适合这个岗位。", image: "https://picsum.photos/600/400?random=1" },
-    { id: 2, title: "请描述你最大的缺点", desc: "谈谈你的不足之处，以及你正在如何改进。", image: "https://picsum.photos/600/400?random=2" },
-    { id: 3, title: "你为什么想加入我们公司", desc: "请说明你选择我们公司的原因以及你的职业规划。", image: "https://picsum.photos/600/400?random=3" },
-    { id: 4, title: "请举例说明你解决困难的经验", desc: "描述一次你面对挑战并成功解决问题的经历。", image: "https://picsum.photos/600/400?random=4" },
-    { id: 5, title: "你的期望薪资是多少", desc: "谈谈你的薪酬期望以及理由。", image: "https://picsum.photos/600/400?random=5" }
-];
-
-const ADMIN_CREDENTIALS = { username: 'admin', password: 'admin123' };
-
+data.rooms.forEach(r => {
+    rooms.set(r.id, { ...r, timer: null });
+});
 function createRoom() {
     const roomId = uuidv4().slice(0, 8).toUpperCase();
     const room = {
         id: roomId,
         adminId: null,
+        adminName: null,
         candidates: [],
         currentIndex: 0,
         questionIndex: 0,
-        questions: [...DEFAULT_QUESTIONS],
+        questions: [...(data.questions.length ? data.questions : DEFAULT_QUESTIONS)],
         timerDuration: 300,
         transitionTime: 30,
         status: 'waiting',
         currentQuestion: null,
         timer: null,
-        timeLeft: 300
+        timeLeft: 300,
+        createdAt: Date.now(),
+        history: []
     };
     rooms.set(roomId, room);
     return room;
 }
-
+app.post('/api/register', (req, res) => {
+    const { username, password, nickname } = req.body;
+    if (!username || !password) {
+        return res.json({ success: false, error: '请填写用户名和密码' });
+    }
+    if (data.users.find(u => u.username === username)) {
+        return res.json({ success: false, error: '用户名已存在' });
+    }
+    const user = {
+        id: uuidv4(),
+        username,
+        password,
+        nickname: nickname || username,
+        role: 'user',
+        createdAt: Date.now(),
+        stats: { total: 0, passed: 0, avgScore: 0 }
+    };
+    data.users.push(user);
+    saveData(data);
+    res.json({ success: true, user: { id: user.id, username: user.username, nickname: user.nickname, role: user.role } });
+});
+app.post('/api/login', (req, res) => {
+    const { username, password } = req.body;
+    const user = data.users.find(u => u.username === username && u.password === password);
+    if (!user) {
+        return res.json({ success: false, error: '用户名或密码错误' });
+    }
+    res.json({ success: true, user: { id: user.id, username: user.username, nickname: user.nickname, role: user.role, stats: user.stats } });
+});
+app.get('/api/questions', (req, res) => {
+    res.json({ success: true, questions: data.questions });
+});
+app.post('/api/questions', (req, res) => {
+    const { title, desc, category } = req.body;
+    if (!title) {
+        return res.json({ success: false, error: '请填写题目标题' });
+    }
+    const question = {
+        id: Date.now(),
+        title,
+        desc: desc || '',
+        category: category || '其他',
+        image: `https://picsum.photos/600/400?random=${Date.now()}`
+    };
+    data.questions.push(question);
+    saveData(data);
+    res.json({ success: true, question });
+});
+app.delete('/api/questions/:id', (req, res) => {
+    const id = parseInt(req.params.id);
+    data.questions = data.questions.filter(q => q.id !== id);
+    rooms.forEach(room => {
+        room.questions = room.questions.filter(q => q.id !== id);
+    });
+    saveData(data);
+    res.json({ success: true });
+});
+app.get('/api/users', (req, res) => {
+    const token = req.headers.authorization;
+    const user = users.get(token);
+    if (!user || user.role !== 'admin') {
+        return res.json({ success: false, error: '无权限' });
+    }
+    res.json({ success: true, users: data.users.map(u => ({ id: u.id, username: u.username, nickname: u.nickname, stats: u.stats, createdAt: u.createdAt })) });
+});
 io.on('connection', (socket) => {
     console.log(`用户连接: ${socket.id}`);
-
+    socket.on('auth', (token) => {
+        if (token) {
+            const userData = data.users.find(u => u.id === token);
+            if (userData) {
+                users.set(socket.id, { ...userData, roomId: null, currentRoomId: null });
+            }
+        }
+    });
     socket.on('createRoom', (data, callback) => {
+        const user = users.get(socket.id);
+        if (!user) {
+            return callback({ success: false, error: '请先登录' });
+        }
         const room = createRoom();
         room.adminId = socket.id;
-        users.set(socket.id, { roomId: room.id, role: 'admin', name: data.name });
+        room.adminName = user.nickname;
+        user.roomId = room.id;
+        user.role = 'admin';
         socket.join(room.id);
-        callback({ success: true, room: serializeRoom(room) });
-        console.log(`房间创建: ${room.id} by ${data.name}`);
+        callback({ success: true, room: serializeRoom(room), user: { id: user.id, username: user.username, nickname: user.nickname, role: user.role } });
+        console.log(`房间创建: ${room.id} by ${user.nickname}`);
     });
-
     socket.on('joinRoom', (data, callback) => {
+        const user = users.get(socket.id);
+        if (!user) {
+            return callback({ success: false, error: '请先登录' });
+        }
         const room = rooms.get(data.roomId);
         if (!room) {
-            callback({ success: false, error: '房间不存在' });
-            return;
+            return callback({ success: false, error: '房间不存在' });
         }
         if (room.status === 'started') {
-            callback({ success: false, error: '考试已开始，无法加入' });
-            return;
+            return callback({ success: false, error: '考试已开始，无法加入' });
         }
         if (room.candidates.length >= 20) {
-            callback({ success: false, error: '房间已满' });
-            return;
+            return callback({ success: false, error: '房间已满' });
         }
-
         const candidate = {
             id: socket.id,
-            name: data.name,
+            odUserId: user.id,
+            name: user.nickname,
+            username: user.username,
             status: 'waiting',
             score: null,
             feedback: '',
             answer: '',
             muted: false,
-            isSpeaking: false
+            isSpeaking: false,
+            joinTime: Date.now()
         };
         room.candidates.push(candidate);
-        users.set(socket.id, { roomId: room.id, role: 'candidate', name: data.name });
+        user.roomId = room.id;
         socket.join(room.id);
-
         io.to(room.id).emit('roomUpdate', serializeRoom(room));
         callback({ success: true, room: serializeRoom(room) });
-        console.log(`${data.name} 加入房间 ${room.id}`);
+        console.log(`${user.nickname} 加入房间 ${room.id}`);
     });
-
-    socket.on('login', (data, callback) => {
-        const user = users.get(socket.id);
-        if (!user) {
-            callback({ success: false, error: '请先加入房间' });
-            return;
-        }
-        if (data.username === ADMIN_CREDENTIALS.username && data.password === ADMIN_CREDENTIALS.password) {
-            user.role = 'admin';
-            const room = rooms.get(user.roomId);
-            room.adminId = socket.id;
-            callback({ success: true });
-            io.to(user.roomId).emit('roomUpdate', serializeRoom(room));
-        } else {
-            callback({ success: false, error: '用户名或密码错误' });
-        }
-    });
-
     socket.on('startExam', (callback) => {
         const user = users.get(socket.id);
         if (!user || user.role !== 'admin') {
-            callback({ success: false, error: '只有管理员可以开始考试' });
-            return;
+            return callback({ success: false, error: '只有管理员可以开始考试' });
         }
         const room = rooms.get(user.roomId);
         if (room.candidates.length < 1) {
-            callback({ success: false, error: '没有考生' });
-            return;
+            return callback({ success: false, error: '没有考生' });
         }
-
         room.status = 'started';
         room.currentIndex = 0;
         room.questionIndex = 0;
@@ -131,36 +210,30 @@ io.on('connection', (socket) => {
         room.candidates.forEach((c, i) => {
             c.status = i === 0 ? 'answering' : 'waiting';
             c.score = null;
+            c.feedback = '';
+            c.answer = '';
         });
-
         io.to(user.roomId).emit('roomUpdate', serializeRoom(room));
         io.to(user.roomId).emit('examStart', { question: room.currentQuestion });
         startTimer(room);
         callback({ success: true });
     });
-
     socket.on('startAnswer', (callback) => {
         const user = users.get(socket.id);
         if (!user) {
-            callback({ success: false, error: '未加入房间' });
-            return;
+            return callback({ success: false, error: '未登录' });
         }
         const room = rooms.get(user.roomId);
         const candidate = room.candidates.find(c => c.id === socket.id);
-
         if (!candidate) {
-            callback({ success: false, error: '未找到考生' });
-            return;
+            return callback({ success: false, error: '未找到考生' });
         }
         if (candidate.muted) {
-            callback({ success: false, error: '已被禁言' });
-            return;
+            return callback({ success: false, error: '已被禁言' });
         }
         if (candidate.status !== 'waiting') {
-            callback({ success: false, error: '当前不是你的答题时间' });
-            return;
+            return callback({ success: false, error: '当前不是你的答题时间' });
         }
-
         room.candidates.forEach((c, i) => {
             if (i === room.currentIndex) {
                 c.status = 'answering';
@@ -170,73 +243,80 @@ io.on('connection', (socket) => {
                 c.isSpeaking = false;
             }
         });
-
         room.timeLeft = room.timerDuration;
         room.currentQuestion = room.questions[room.questionIndex];
         startTimer(room);
-
         io.to(user.roomId).emit('roomUpdate', serializeRoom(room));
         io.to(user.roomId).emit('answerStart', { candidate: candidate.name, question: room.currentQuestion });
         callback({ success: true, question: room.currentQuestion });
     });
-
     socket.on('stopAnswer', (callback) => {
         const user = users.get(socket.id);
         if (!user) return;
         const room = rooms.get(user.roomId);
-
         if (room.timer) {
             clearInterval(room.timer);
             room.timer = null;
         }
-
         const currentCandidate = room.candidates[room.currentIndex];
         if (currentCandidate) {
             currentCandidate.status = 'completed';
             currentCandidate.isSpeaking = false;
-
             const score = Math.floor(Math.random() * 30) + 70;
             const feedbacks = [
                 '表达清晰有条理，但可以更加自信一些。建议多使用具体案例来支撑你的观点。',
                 '整体表现不错，语言流畅。建议在回答问题时更加具体一些，多展示你的实际能力。',
                 '回答得很全面，但语速稍快。建议适当停顿，给面试官思考的时间。',
-                '思路清晰，回答有针对性。可以增加一些个人特色的表达，让回答更有记忆点。'
+                '思路清晰，回答有针对性。可以增加一些个人特色的表达，让回答更有记忆点。',
+                '内容充实，但缺乏与岗位的关联性。建议多强调与职位相关的能力和经验。',
+                '逻辑清晰，但情感表达稍显不足。建议增加一些真诚的情感表达。'
             ];
-            const answer = `感谢面试官，我叫${currentCandidate.name}，毕业于XX大学XX专业。在校期间，我积累了扎实的专业基础，曾获得XX奖项。毕业后我一直在从事相关工作，积累了丰富的项目经验。我认为自己最大的优势是学习能力强、善于沟通、具备团队协作精神。相信我的能力可以为贵公司创造价值。`;
-
+            const answers = [
+                `感谢面试官，我叫${currentCandidate.name}，毕业于XX大学XX专业。在校期间，我积累了扎实的专业基础，曾获得XX奖项。毕业后我一直在从事相关工作，积累了丰富的项目经验。我认为自己最大的优势是学习能力强、善于沟通、具备团队协作精神。相信我的能力可以为贵公司创造价值。`,
+                `您好，我叫${currentCandidate.name}。我是一名有着3年工作经验的XX专业人才。在上一家公司，我负责XX工作，成功完成了XX项目，取得了XX成果。我对贵公司的XX岗位非常感兴趣，希望能够加入团队共同发展。`,
+                `面试官好，我是${currentCandidate.name}。我竞选这个岗位的优势主要有三点：第一，我具备扎实的专业技能；第二，我有丰富的项目经验；第三，我有良好的团队协作能力。我相信这些优势能够帮助我胜任这份工作。`
+            ];
             currentCandidate.score = score;
             currentCandidate.feedback = feedbacks[Math.floor(Math.random() * feedbacks.length)];
-            currentCandidate.answer = answer;
+            currentCandidate.answer = answers[Math.floor(Math.random() * answers.length)];
+            currentCandidate.finishTime = Date.now();
+            const odUser = data.users.find(u => u.id === currentCandidate.odUserId);
+            if (odUser) {
+                odUser.stats = odUser.stats || { total: 0, passed: 0, avgScore: 0 };
+                odUser.stats.total++;
+                odUser.stats.avgScore = Math.round((odUser.stats.avgScore * (odUser.stats.total - 1) + score) / odUser.stats.total);
+                if (score >= 80) odUser.stats.passed++;
+                saveData(data);
+            }
+            room.history.push({
+                candidateId: currentCandidate.id,
+                name: currentCandidate.name,
+                score: score,
+                feedback: currentCandidate.feedback,
+                time: Date.now()
+            });
         }
-
         io.to(user.roomId).emit('answerEnd', { candidate: currentCandidate, score: currentCandidate.score });
         io.to(user.roomId).emit('roomUpdate', serializeRoom(room));
-
         if (callback) callback({ success: true, candidate: currentCandidate });
     });
-
     socket.on('nextCandidate', (callback) => {
         const user = users.get(socket.id);
         if (!user || user.role !== 'admin') {
-            callback({ success: false, error: '只有管理员可以切换' });
-            return;
+            return callback({ success: false, error: '只有管理员可以切换' });
         }
         const room = rooms.get(user.roomId);
-
         room.currentIndex++;
         room.questionIndex++;
-
         if (room.currentIndex >= room.candidates.length) {
             room.status = 'finished';
-            io.to(user.roomId).emit('examEnd', { candidates: room.candidates });
+            io.to(user.roomId).emit('examEnd', { candidates: room.candidates, history: room.history });
             if (callback) callback({ success: true, finished: true });
             return;
         }
-
         if (room.questionIndex >= room.questions.length) {
             room.questionIndex = 0;
         }
-
         room.candidates.forEach((c, i) => {
             if (i === room.currentIndex) {
                 c.status = 'waiting';
@@ -247,19 +327,15 @@ io.on('connection', (socket) => {
                 c.status = 'waiting';
             }
         });
-
         room.currentQuestion = room.questions[room.questionIndex];
         io.to(user.roomId).emit('roomUpdate', serializeRoom(room));
         io.to(user.roomId).emit('candidateChange', { nextCandidate: room.candidates[room.currentIndex].name, question: room.currentQuestion });
-
         if (callback) callback({ success: true, finished: false });
     });
-
     socket.on('toggleMute', (data, callback) => {
         const user = users.get(socket.id);
         if (!user || user.role !== 'admin') {
-            callback({ success: false, error: '只有管理员可以禁言' });
-            return;
+            return callback({ success: false, error: '只有管理员可以禁言' });
         }
         const room = rooms.get(user.roomId);
         const candidate = room.candidates.find(c => c.id === data.candidateId);
@@ -269,17 +345,15 @@ io.on('connection', (socket) => {
             callback({ success: true, muted: candidate.muted });
         }
     });
-
     socket.on('removeCandidate', (data, callback) => {
         const user = users.get(socket.id);
         if (!user || user.role !== 'admin') {
-            callback({ success: false, error: '只有管理员可以移除考生' });
-            return;
+            return callback({ success: false, error: '只有管理员可以移除考生' });
         }
         const room = rooms.get(user.roomId);
         const index = room.candidates.findIndex(c => c.id === data.candidateId);
         if (index > -1) {
-            const removed = room.candidates.splice(index, 1)[0];
+            room.candidates.splice(index, 1);
             if (room.currentIndex >= room.candidates.length) {
                 room.currentIndex = Math.max(0, room.candidates.length - 1);
             }
@@ -287,66 +361,56 @@ io.on('connection', (socket) => {
             callback({ success: true });
         }
     });
-
     socket.on('addQuestion', (data, callback) => {
         const user = users.get(socket.id);
         if (!user || user.role !== 'admin') {
-            callback({ success: false, error: '只有管理员可以添加题目' });
-            return;
+            return callback({ success: false, error: '只有管理员可以添加题目' });
         }
         const room = rooms.get(user.roomId);
         const question = {
             id: Date.now(),
             title: data.title,
             desc: data.desc || '',
+            category: data.category || '其他',
             image: `https://picsum.photos/600/400?random=${Date.now()}`
         };
         room.questions.push(question);
         io.to(user.roomId).emit('roomUpdate', serializeRoom(room));
         callback({ success: true });
     });
-
     socket.on('deleteQuestion', (data, callback) => {
         const user = users.get(socket.id);
         if (!user || user.role !== 'admin') {
-            callback({ success: false, error: '只有管理员可以删除题目' });
-            return;
+            return callback({ success: false, error: '只有管理员可以删除题目' });
         }
         const room = rooms.get(user.roomId);
         room.questions = room.questions.filter(q => q.id !== data.questionId);
         io.to(user.roomId).emit('roomUpdate', serializeRoom(room));
         callback({ success: true });
     });
-
-    socket.on('importQuestions', (data, callback) => {
-        const user = users.get(socket.id);
-        if (!user || user.role !== 'admin') {
-            callback({ success: false, error: '只有管理员可以导入题目' });
-            return;
-        }
-        const room = rooms.get(user.roomId);
-        data.questions.forEach(q => {
-            room.questions.push({
-                id: q.id || Date.now() + Math.random(),
-                title: q.title,
-                desc: q.desc || '',
-                image: q.image || `https://picsum.photos/600/400?random=${Date.now()}`
-            });
-        });
-        io.to(user.roomId).emit('roomUpdate', serializeRoom(room));
-        callback({ success: true, count: data.questions.length });
-    });
-
     socket.on('getRoomInfo', (callback) => {
         const user = users.get(socket.id);
         if (!user) {
-            callback({ success: false, error: '未加入房间' });
-            return;
+            return callback({ success: false, error: '未登录' });
         }
         const room = rooms.get(user.roomId);
+        if (!room) {
+            return callback({ success: false, error: '未加入房间' });
+        }
         callback({ success: true, room: serializeRoom(room), user: user });
     });
-
+    socket.on('getMyStats', (callback) => {
+        const user = users.get(socket.id);
+        if (!user) {
+            return callback({ success: false, error: '未登录' });
+        }
+        const odUser = data.users.find(u => u.id === user.id);
+        if (odUser) {
+            callback({ success: true, stats: odUser.stats || { total: 0, passed: 0, avgScore: 0 } });
+        } else {
+            callback({ success: true, stats: { total: 0, passed: 0, avgScore: 0 } });
+        }
+    });
     socket.on('disconnect', () => {
         const user = users.get(socket.id);
         if (user) {
@@ -354,6 +418,7 @@ io.on('connection', (socket) => {
             if (room) {
                 if (user.role === 'admin') {
                     io.to(room.id).emit('adminLeft');
+                    room.history = [];
                     rooms.delete(room.id);
                 } else {
                     const index = room.candidates.findIndex(c => c.id === socket.id);
@@ -371,14 +436,12 @@ io.on('connection', (socket) => {
         console.log(`用户断开: ${socket.id}`);
     });
 });
-
 function startTimer(room) {
     if (room.timer) clearInterval(room.timer);
     room.timeLeft = room.timerDuration;
     room.timer = setInterval(() => {
         room.timeLeft--;
         io.to(room.id).emit('timerUpdate', { timeLeft: room.timeLeft, duration: room.timerDuration });
-
         if (room.timeLeft <= 0) {
             clearInterval(room.timer);
             room.timer = null;
@@ -386,10 +449,10 @@ function startTimer(room) {
         }
     }, 1000);
 }
-
 function serializeRoom(room) {
     return {
         id: room.id,
+        adminName: room.adminName,
         status: room.status,
         candidates: room.candidates,
         currentIndex: room.currentIndex,
@@ -397,25 +460,12 @@ function serializeRoom(room) {
         questions: room.questions,
         currentQuestion: room.currentQuestion,
         timeLeft: room.timeLeft,
-        timerDuration: room.timerDuration
+        timerDuration: room.timerDuration,
+        history: room.history || []
     };
 }
-
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`服务器运行在 http://localhost:${PORT}`);
-    console.log(`局域网访问: http://${getLocalIP()}:${PORT}`);
+    console.log(`公网访问: https://interview-practice-online1.onrender.com`);
 });
-
-function getLocalIP() {
-    const os = require('os');
-    const interfaces = os.networkInterfaces();
-    for (const name of Object.keys(interfaces)) {
-        for (const iface of interfaces[name]) {
-            if (iface.family === 'IPv4' && !iface.internal) {
-                return iface.address;
-            }
-        }
-    }
-    return 'localhost';
-}
