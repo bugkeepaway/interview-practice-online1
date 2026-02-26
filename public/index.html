@@ -1,1 +1,1003 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI面试对练系统 - 联网版</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <style>
+        :root {
+            --primary: #1a1a2e;
+            --secondary: #16213e;
+            --accent: #e94560;
+            --success: #00d9a5;
+            --warning: #ffc107;
+            --text: #eaeaea;
+            --text-dim: #8b8b9e;
+            --card-bg: #232741;
+            --glow: 0 0 30px rgba(233, 69, 96, 0.4);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            min-height: 100vh;
+            color: var(--text);
+        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        
+        header {
+            text-align: center;
+            padding: 20px 0;
+            position: relative;
+        }
+        header h1 {
+            font-size: 2rem;
+            background: linear-gradient(90deg, var(--accent), var(--warning));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .header-info {
+            position: absolute;
+            right: 20px;
+            top: 20px;
+            font-size: 0.9rem;
+            color: var(--text-dim);
+        }
 
+        .panel {
+            background: var(--card-bg);
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 500px;
+            margin: 0 auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+        }
+        .panel h2 { margin-bottom: 30px; text-align: center; }
+        
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; color: var(--text-dim); }
+        .form-group input, .form-group textarea, .form-group select {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #3a3a5c;
+            border-radius: 10px;
+            background: var(--primary);
+            color: var(--text);
+            font-size: 1rem;
+        }
+        .form-group input:focus { outline: none; border-color: var(--accent); }
+
+        .btn {
+            padding: 14px 30px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent), #ff6b6b);
+            color: white;
+            width: 100%;
+        }
+        .btn-success { background: linear-gradient(135deg, var(--success), #00b894); color: white; }
+        .btn-warning { background: linear-gradient(135deg, var(--warning), #fdcb6e); color: var(--primary); }
+        .btn-danger { background: linear-gradient(135deg, #e74c3c, #c0392b); color: white; }
+        .btn-secondary { background: #3a3a5c; color: white; }
+        .btn-sm { padding: 8px 16px; font-size: 0.85rem; }
+
+        .admin-panel, .main-interface { display: none; }
+        .admin-panel.active, .main-interface.active { display: block; }
+
+        .arena {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 25px;
+            margin-top: 25px;
+        }
+        
+        .card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 20px;
+        }
+
+        .ai-examiner { text-align: center; padding: 25px; }
+        .ai-avatar {
+            width: 100px; height: 100px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            margin: 0 auto 15px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 2.5rem;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.4); }
+            50% { box-shadow: 0 0 0 20px rgba(102, 126, 234, 0); }
+        }
+        .ai-name { font-size: 1.2rem; font-weight: 600; margin-bottom: 5px; }
+        .ai-role { color: var(--text-dim); font-size: 0.85rem; }
+
+        .question-panel { flex: 1; }
+        .question-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 15px;
+        }
+        .question-header h3 { color: var(--warning); font-size: 1rem; }
+        .question-badge { background: var(--accent); padding: 4px 12px; border-radius: 15px; font-size: 0.8rem; }
+        .question-image {
+            width: 100%; max-height: 280px; object-fit: contain;
+            border-radius: 10px; background: var(--primary); cursor: pointer;
+        }
+        .question-title {
+            margin-top: 15px; padding: 12px;
+            background: var(--primary); border-radius: 8px; border-left: 3px solid var(--accent);
+        }
+        .question-title h4 { font-size: 1rem; margin-bottom: 5px; }
+        .question-title p { color: var(--text-dim); font-size: 0.9rem; }
+
+        .timer-panel { text-align: center; }
+        .timer-display {
+            font-size: 3.5rem; font-weight: 700; color: var(--accent);
+            font-family: 'Courier New', monospace;
+        }
+        .timer-display.warning { color: var(--warning); animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0.5; } }
+        .timer-label { color: var(--text-dim); margin-top: 8px; font-size: 0.9rem; }
+        .timer-progress {
+            width: 100%; height: 6px; background: var(--primary);
+            border-radius: 3px; margin-top: 15px; overflow: hidden;
+        }
+        .timer-progress-bar {
+            height: 100%; background: linear-gradient(90deg, var(--accent), var(--warning));
+            transition: width 1s;
+        }
+        .control-buttons { margin-top: 20px; display: flex; gap: 12px; justify-content: center; }
+
+        .candidates-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+        }
+        .candidate-card {
+            background: var(--card-bg); border-radius: 12px; padding: 15px;
+            text-align: center; border: 2px solid transparent;
+            position: relative;
+        }
+        .candidate-card.current { border-color: var(--warning); box-shadow: 0 0 20px rgba(255,193,7,0.3); }
+        .candidate-card.completed { border-color: var(--success); }
+        .candidate-card.muted { opacity: 0.5; }
+        .candidate-card.muted::after { content: '🔇'; position: absolute; top: 8px; right: 8px; }
+        
+        .candidate-number {
+            width: 35px; height: 35px; border-radius: 50%;
+            background: var(--primary); display: flex; align-items: center; justify-content: center;
+            margin: 0 auto 10px; font-weight: 700;
+        }
+        .candidate-card.current .candidate-number { background: var(--warning); color: var(--primary); }
+        .candidate-card.completed .candidate-number { background: var(--success); color: var(--primary); }
+        .candidate-name { font-weight: 600; font-size: 0.95rem; margin-bottom: 6px; }
+        .candidate-status {
+            font-size: 0.8rem; padding: 4px 10px; border-radius: 12px; display: inline-block;
+        }
+        .status-waiting { background: #3a3a5c; color: var(--text-dim); }
+        .status-answering { background: var(--accent); color: white; animation: pulse 1s infinite; }
+        .status-completed { background: var(--success); color: var(--primary); }
+        .status-rest { background: var(--warning); color: var(--primary); }
+        .candidate-score { margin-top: 8px; font-size: 1.1rem; font-weight: 700; color: var(--success); }
+        .candidate-actions { margin-top: 10px; display: flex; gap: 6px; justify-content: center; }
+        
+        .audio-wave {
+            display: flex; align-items: center; justify-content: center; gap: 3px;
+            height: 25px; margin-top: 10px;
+        }
+        .audio-wave .bar {
+            width: 3px; background: var(--accent); border-radius: 2px;
+            animation: wave 0.5s infinite ease-in-out;
+        }
+        .audio-wave .bar:nth-child(1) { height: 8px; animation-delay: 0s; }
+        .audio-wave .bar:nth-child(2) { height: 16px; animation-delay: 0.1s; }
+        .audio-wave .bar:nth-child(3) { height: 12px; animation-delay: 0.2s; }
+        .audio-wave .bar:nth-child(4) { height: 20px; animation-delay: 0.3s; }
+        .audio-wave .bar:nth-child(5) { height: 10px; animation-delay: 0.4s; }
+        @keyframes wave { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(0.5); } }
+        .audio-wave.hidden { display: none; }
+
+        .result-panel {
+            background: var(--card-bg); border-radius: 16px; padding: 20px; margin-top: 20px;
+            display: none;
+        }
+        .result-panel.show { display: block; animation: slideUp 0.5s; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; } }
+        .result-score {
+            font-size: 3rem; font-weight: 700;
+            background: linear-gradient(90deg, var(--success), var(--warning));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .result-feedback h4, .optimal-answer h4 { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 8px; text-transform: uppercase; }
+        .result-feedback p { background: var(--primary); padding: 12px; border-radius: 8px; line-height: 1.6; font-size: 0.9rem; }
+        .optimal-answer {
+            background: rgba(0,217,165,0.1); border: 1px solid var(--success);
+            border-radius: 10px; padding: 15px; margin-top: 15px;
+        }
+        .optimal-answer h4 { color: var(--success); }
+
+        .end-screen { display: none; text-align: center; padding: 50px 20px; }
+        .end-screen.show { display: block; }
+        .end-icon { font-size: 4rem; margin-bottom: 20px; }
+        .end-title {
+            font-size: 2rem; margin-bottom: 15px;
+            background: linear-gradient(90deg, var(--success), var(--warning));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .summary-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px; margin-top: 30px; max-width: 700px; margin-left: auto; margin-right: auto;
+        }
+        .summary-card { background: var(--card-bg); border-radius: 12px; padding: 20px; }
+
+        .modal {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); display: none; align-items: center; justify-content: center;
+            z-index: 2000;
+        }
+        .modal.show { display: flex; }
+        .modal-content {
+            background: var(--card-bg); border-radius: 16px; padding: 30px;
+            max-width: 90%; max-height: 90%; overflow: auto; position: relative;
+        }
+        .modal-close {
+            position: absolute; top: 12px; right: 15px;
+            background: none; border: none; color: var(--text); font-size: 1.8rem; cursor: pointer;
+        }
+
+        .notification {
+            position: fixed; top: 20px; right: 20px;
+            background: var(--card-bg); border-radius: 10px; padding: 15px 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+            transform: translateX(120%); transition: transform 0.4s;
+            z-index: 1001; border-left: 4px solid var(--success);
+        }
+        .notification.show { transform: translateX(0); }
+        .notification-title { font-weight: 600; margin-bottom: 4px; }
+        .notification-message { color: var(--text-dim); font-size: 0.85rem; }
+
+        .admin-tabs {
+            display: flex; gap: 10px; margin-bottom: 25px; border-bottom: 2px solid var(--primary); padding-bottom: 12px;
+        }
+        .admin-tab {
+            padding: 10px 20px; background: transparent; border: none;
+            color: var(--text-dim); cursor: pointer; border-radius: 8px;
+        }
+        .admin-tab.active { background: var(--accent); color: white; }
+        .admin-section { display: none; }
+        .admin-section.active { display: block; }
+
+        .question-list { max-height: 300px; overflow-y: auto; }
+        .question-item {
+            background: var(--primary); border-radius: 10px; padding: 15px;
+            margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;
+        }
+        .question-item-info h4 { margin-bottom: 5px; font-size: 0.95rem; }
+        .question-item-info p { color: var(--text-dim); font-size: 0.85rem; }
+        .question-item-actions { display: flex; gap: 8px; }
+
+        .file-upload-area {
+            border: 2px dashed var(--accent); border-radius: 12px; padding: 30px;
+            text-align: center; cursor: pointer; margin-bottom: 20px;
+        }
+        .file-upload-area:hover { background: rgba(233,69,96,0.1); }
+        .file-upload-area input { display: none; }
+        .upload-icon { font-size: 2.5rem; margin-bottom: 10px; }
+
+        .word-preview-item {
+            padding: 10px; border-bottom: 1px solid #3a3a5c; cursor: pointer;
+        }
+        .word-preview-item:hover { background: var(--secondary); }
+        .word-preview-item.selected { background: rgba(233,69,96,0.2); border-left: 3px solid var(--accent); }
+
+        .waiting-room {
+            text-align: center; padding: 40px;
+        }
+        .room-code {
+            font-size: 2.5rem; font-weight: 700;
+            background: linear-gradient(90deg, var(--success), var(--warning));
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            letter-spacing: 8px; margin: 20px 0;
+        }
+        .waiting-list {
+            max-height: 300px; overflow-y: auto; margin: 20px 0;
+        }
+        .waiting-item {
+            background: var(--primary); border-radius: 10px; padding: 12px 20px;
+            margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;
+        }
+
+        .status-badge {
+            display: inline-block; padding: 6px 14px; border-radius: 20px; font-size: 0.85rem;
+        }
+        .status-not-started { background: #3a3a5c; }
+        .status-in-progress { background: var(--accent); }
+        .status-finished { background: var(--success); color: var(--primary); }
+
+        @media (max-width: 1000px) {
+            .arena { grid-template-columns: 1fr; }
+            .candidates-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 600px) {
+            .candidates-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎯 AI 面试对练系统</h1>
+            <div class="header-info" id="headerInfo"></div>
+        </header>
+
+        <div class="panel" id="startPanel">
+            <h2>选择加入方式</h2>
+            <div class="form-group">
+                <label>你的名字</label>
+                <input type="text" id="userName" placeholder="请输入名字" value="考生">
+            </div>
+            <div class="form-group">
+                <label>房间代码（加入已有房间）</label>
+                <input type="text" id="roomCode" placeholder="如: ABC12345" style="text-transform: uppercase;">
+            </div>
+            <button class="btn btn-primary" onclick="joinRoom()">加入房间</button>
+            <div style="text-align: center; margin: 20px 0; color: var(--text-dim);">或</div>
+            <button class="btn btn-success" onclick="createRoom()">创建新房（管理员）</button>
+        </div>
+
+        <div class="panel waiting-room" id="waitingPanel" style="display: none;">
+            <h2>等待室</h2>
+            <p style="color: var(--text-dim);">房间代码</p>
+            <div class="room-code" id="displayRoomCode"></div>
+            <p style="color: var(--text-dim);">请将此代码分享给其他考生</p>
+            
+            <div class="waiting-list" id="waitingList"></div>
+            
+            <div id="adminWaitingControls" style="display: none;">
+                <div class="status-badge status-not-started" id="roomStatusBadge">等待开始</div>
+                <button class="btn btn-success" onclick="startExam()" style="margin-top: 20px;">开始考试</button>
+                <button class="btn btn-primary" onclick="showAdminPanel()" style="margin-top: 15px;">管理面板</button>
+            </div>
+            <div id="candidateWaitingControls" style="display: none;">
+                <p style="color: var(--text-dim); margin-top: 20px;">请等待管理员开始考试...</p>
+            </div>
+        </div>
+
+        <div class="admin-panel" id="adminPanel">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2>管理中心</h2>
+                <button class="btn btn-secondary btn-sm" onclick="showWaitingPanel()">返回</button>
+            </div>
+            <div class="admin-tabs">
+                <button class="admin-tab active" onclick="showAdminTab('questions')">题库</button>
+                <button class="admin-tab" onclick="showAdminTab('users')">考生</button>
+                <button class="admin-tab" onclick="showAdminTab('settings')">设置</button>
+            </div>
+
+            <div class="admin-section active" id="tab-questions">
+                <div class="file-upload-area" onclick="document.getElementById('wordFile').click()">
+                    <div class="upload-icon">📄</div>
+                    <p>点击上传Word文档导入题目</p>
+                    <p style="color: var(--text-dim); font-size: 0.8rem;">支持.docx格式</p>
+                    <input type="file" id="wordFile" accept=".docx" onchange="handleWordUpload(event)">
+                </div>
+                <div id="wordPreview" style="display: none; margin-bottom: 20px;">
+                    <h4 style="margin-bottom: 10px;">导入预览</h4>
+                    <div id="wordPreviewList"></div>
+                    <div style="margin-top: 12px; display: flex; gap: 10px;">
+                        <button class="btn btn-success btn-sm" onclick="importSelectedQuestions()">导入</button>
+                        <button class="btn btn-secondary btn-sm" onclick="closeWordPreview()">取消</button>
+                    </div>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin: 20px 0;">
+                    <h3>题库</h3>
+                    <button class="btn btn-success btn-sm" onclick="showAddQuestion()">+ 添加</button>
+                </div>
+                <div class="question-list" id="questionList"></div>
+            </div>
+
+            <div class="admin-section" id="tab-users">
+                <h3 style="margin-bottom: 15px;">考生管理</h3>
+                <div class="candidates-grid" id="adminCandidatesGrid"></div>
+            </div>
+
+            <div class="admin-section" id="tab-settings">
+                <h3 style="margin-bottom: 15px;">系统设置</h3>
+                <div class="form-group">
+                    <label>答题时间（分钟）</label>
+                    <input type="number" id="settingTimer" value="5" min="1">
+                </div>
+                <div class="form-group">
+                    <label>管理员密码</label>
+                    <input type="password" id="settingPassword" placeholder="留空不修改">
+                </div>
+                <button class="btn btn-success" onclick="saveSettings()">保存</button>
+            </div>
+        </div>
+
+        <div class="main-interface" id="mainInterface">
+            <div class="arena">
+                <div class="left-panel" style="display: flex; flex-direction: column; gap: 15px;">
+                    <div class="card ai-examiner">
+                        <div class="ai-avatar">🤖</div>
+                        <div class="ai-name">AI 主考官</div>
+                        <div class="ai-role">专业面试官</div>
+                    </div>
+
+                    <div class="card question-panel">
+                        <div class="question-header">
+                            <h3>📋 当前考题</h3>
+                            <span class="question-badge">第 <span id="currentQuestionNum">1</span> 题</span>
+                        </div>
+                        <img src="" alt="题目" class="question-image" id="questionImage">
+                        <div class="question-title">
+                            <h4 id="questionTitle"></h4>
+                            <p id="questionDesc"></p>
+                        </div>
+                    </div>
+
+                    <div class="card timer-panel">
+                        <div class="timer-display" id="timerDisplay">05:00</div>
+                        <div class="timer-label">答题倒计时</div>
+                        <div class="timer-progress">
+                            <div class="timer-progress-bar" id="timerProgressBar"></div>
+                        </div>
+                        <div class="control-buttons" id="controlButtons">
+                            <button class="btn btn-success" id="startBtn" onclick="startAnswer()">开始答题</button>
+                            <button class="btn btn-secondary" id="stopBtn" onclick="stopAnswer()" style="display: none;">结束答题</button>
+                        </div>
+                        <div id="adminControls" style="display: none; margin-top: 15px;">
+                            <button class="btn btn-primary" onclick="nextCandidate()">下一位</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="right-panel">
+                    <div class="card">
+                        <h3 style="margin-bottom: 15px;">考生列表</h3>
+                        <div class="candidates-grid" id="candidatesGrid"></div>
+                    </div>
+
+                    <div class="result-panel" id="resultPanel">
+                        <div style="text-align: center; margin-bottom: 15px;">
+                            <div class="result-score" id="resultScore">85</div>
+                            <div>综合评分</div>
+                        </div>
+                        <div class="result-feedback">
+                            <h4>AI 评价</h4>
+                            <p id="aiFeedback"></p>
+                        </div>
+                        <div class="optimal-answer">
+                            <h4>✨ 优化答案</h4>
+                            <p id="optimalAnswer"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="end-screen" id="endScreen">
+            <div class="end-icon">🎉</div>
+            <h2 class="end-title">考试结束！</h2>
+            <div class="summary-grid" id="summaryGrid"></div>
+            <button class="btn btn-primary" onclick="location.reload()" style="margin-top: 30px;">重新开始</button>
+        </div>
+    </div>
+
+    <div class="modal" id="questionModal">
+        <div class="modal-content" style="max-width: 450px;">
+            <button class="modal-close" onclick="closeQuestionModal()">&times;</button>
+            <h3 id="questionModalTitle" style="margin-bottom: 20px;">添加题目</h3>
+            <div class="form-group">
+                <label>题目标题</label>
+                <input type="text" id="questionTitleInput">
+            </div>
+            <div class="form-group">
+                <label>题目描述</label>
+                <textarea id="questionDescInput" rows="3"></textarea>
+            </div>
+            <button class="btn btn-success" onclick="saveQuestion()">保存</button>
+        </div>
+    </div>
+
+    <div class="notification" id="notification">
+        <div class="notification-title" id="notificationTitle"></div>
+        <div class="notification-message" id="notificationMessage"></div>
+    </div>
+
+    <script>
+        const socket = io();
+        let currentUser = null;
+        let currentRoom = null;
+        let isAdmin = false;
+        let selectedWordQuestions = [];
+        let editingQuestionId = null;
+        let localStream = null;
+        let peerConnections = {};
+
+        const CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+        function show(id) {
+            document.querySelectorAll('.panel, .admin-panel, .main-interface, .end-screen').forEach(el => el.style.display = 'none');
+            const el = document.getElementById(id);
+            if (el) el.style.display = id === 'waitingPanel' ? 'block' : (id === 'adminPanel' ? 'block' : (id === 'mainInterface' ? 'block' : (id === 'endScreen' ? 'block' : 'block')));
+            if (id === 'startPanel') document.getElementById('startPanel').style.display = 'block';
+            if (id === 'waitingPanel') document.getElementById('waitingPanel').style.display = 'block';
+            if (id === 'adminPanel') document.getElementById('adminPanel').style.display = 'block';
+            if (id === 'mainInterface') document.getElementById('mainInterface').style.display = 'block';
+            if (id === 'endScreen') document.getElementById('endScreen').style.display = 'block';
+        }
+
+        function joinRoom() {
+            const name = document.getElementById('userName').value.trim();
+            const code = document.getElementById('roomCode').value.trim().toUpperCase();
+            if (!name) return showNotification('请输入名字');
+            if (!code) return showNotification('请输入房间代码');
+
+            socket.emit('joinRoom', { roomId: code, name: name }, (res) => {
+                if (res.success) {
+                    currentUser = { name, role: 'candidate' };
+                    currentRoom = res.room;
+                    isAdmin = false;
+                    show('waitingPanel');
+                    updateWaitingRoom();
+                    initWebRTC();
+                } else {
+                    showNotification(res.error || '加入失败');
+                }
+            });
+        }
+
+        function createRoom() {
+            const name = document.getElementById('userName').value.trim();
+            if (!name) return showNotification('请输入名字');
+
+            socket.emit('createRoom', { name }, (res) => {
+                if (res.success) {
+                    currentUser = { name, role: 'admin' };
+                    currentRoom = res.room;
+                    isAdmin = true;
+                    show('waitingPanel');
+                    updateWaitingRoom();
+                }
+            });
+        }
+
+        function updateWaitingRoom() {
+            document.getElementById('displayRoomCode').textContent = currentRoom.id;
+            document.getElementById('headerInfo').textContent = `${currentUser.name} | 房间: ${currentRoom.id}`;
+            
+            document.getElementById('adminWaitingControls').style.display = isAdmin ? 'block' : 'none';
+            document.getElementById('candidateWaitingControls').style.display = isAdmin ? 'none' : 'block';
+
+            const list = document.getElementById('waitingList');
+            list.innerHTML = currentRoom.candidates.map((c, i) => `
+                <div class="waiting-item">
+                    <span>${i + 1}. ${c.name}</span>
+                    <span class="status-badge status-${c.status === 'answering' ? 'in-progress' : 'not-started'}">${c.status === 'answering' ? '答题中' : '等待中'}</span>
+                </div>
+            `).join('');
+        }
+
+        function updateCandidatesGrid() {
+            const grid = document.getElementById('candidatesGrid');
+            grid.innerHTML = currentRoom.candidates.map((c, i) => {
+                let statusText = '', statusClass = '';
+                switch(c.status) {
+                    case 'waiting': statusText = '等待中'; statusClass = 'status-waiting'; break;
+                    case 'answering': statusText = '答题中'; statusClass = 'status-answering'; break;
+                    case 'completed': statusText = '已完成'; statusClass = 'status-completed'; break;
+                    case 'rest': statusText = '旁听中'; statusClass = 'status-rest'; break;
+                }
+                return `
+                    <div class="candidate-card ${c.status} ${c.muted ? 'muted' : ''} ${i === currentRoom.currentIndex ? 'current' : ''}">
+                        <div class="candidate-number">${i + 1}</div>
+                        <div class="candidate-name">${c.name}</div>
+                        <span class="candidate-status ${statusClass}">${statusText}</span>
+                        ${c.score !== null ? `<div class="candidate-score">${c.score}分</div>` : ''}
+                        <div class="audio-wave ${c.status !== 'answering' ? 'hidden' : ''}">
+                            <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+                        </div>
+                        ${isAdmin ? `
+                            <div class="candidate-actions">
+                                <button class="btn-sm ${c.muted ? 'btn-success' : 'btn-danger'}" onclick="toggleMute('${c.id}')">${c.muted ? '解禁' : '禁言'}</button>
+                                <button class="btn-sm btn-secondary" onclick="removeCandidate('${c.id}')">移除</button>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+
+            if (isAdmin) {
+                const adminGrid = document.getElementById('adminCandidatesGrid');
+                if (adminGrid) {
+                    adminGrid.innerHTML = grid.innerHTML;
+                }
+            }
+        }
+
+        function updateQuestionPanel() {
+            const q = currentRoom.currentQuestion;
+            if (!q) return;
+            document.getElementById('questionImage').src = q.image;
+            document.getElementById('questionTitle').textContent = q.title;
+            document.getElementById('questionDesc').textContent = q.desc;
+            document.getElementById('currentQuestionNum').textContent = currentRoom.questionIndex + 1;
+        }
+
+        function updateTimer() {
+            const timeLeft = currentRoom.timeLeft || 0;
+            const duration = currentRoom.timerDuration || 300;
+            const mins = Math.floor(timeLeft / 60);
+            const secs = timeLeft % 60;
+            document.getElementById('timerDisplay').textContent = `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
+            document.getElementById('timerProgressBar').style.width = `${(timeLeft / duration) * 100}%`;
+            
+            if (timeLeft <= 60) document.getElementById('timerDisplay').classList.add('warning');
+            else document.getElementById('timerDisplay').classList.remove('warning');
+        }
+
+        function updateControls() {
+            const myIndex = currentRoom.candidates.findIndex(c => c.name === currentUser.name);
+            const me = currentRoom.candidates[myIndex];
+            
+            document.getElementById('adminControls').style.display = isAdmin ? 'block' : 'none';
+            
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            
+            if (me && me.status === 'waiting' && myIndex === currentRoom.currentIndex) {
+                startBtn.style.display = me.muted ? 'none' : 'inline-block';
+                startBtn.textContent = '开始答题';
+            } else {
+                startBtn.style.display = 'none';
+            }
+            stopBtn.style.display = me && me.status === 'answering' ? 'inline-block' : 'none';
+        }
+
+        async function startAnswer() {
+            if (!localStream) {
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    setupAudioVisualization();
+                } catch (e) {
+                    showNotification('需要麦克风权限');
+                    return;
+                }
+            }
+            socket.emit('startAnswer', (res) => {
+                if (res.success) {
+                    broadcastAudio();
+                } else {
+                    showNotification(res.error);
+                }
+            });
+        }
+
+        function stopAnswer() {
+            socket.emit('stopAnswer');
+            stopBroadcastAudio();
+        }
+
+        function nextCandidate() {
+            socket.emit('nextCandidate', (res) => {
+                if (res.success && res.finished) {
+                    show('endScreen');
+                }
+            });
+        }
+
+        function startExam() {
+            socket.emit('startExam', (res) => {
+                if (!res.success) showNotification(res.error);
+            });
+        }
+
+        function initWebRTC() {
+            socket.on('candidateSpeaking', async ({ candidateId, speaking }) => {
+                if (speaking && !peerConnections[candidateId]) {
+                    const pc = new RTCPeerConnection(CONFIG);
+                    pc.onicecandidate = e => {
+                        if (e.candidate) socket.emit('iceCandidate', { candidateId, candidate: e.candidate });
+                    };
+                    pc.ontrack = e => {
+                        const audio = new Audio();
+                        audio.srcObject = e.streams[0];
+                        audio.autoplay = true;
+                    };
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+                    socket.emit('offer', { candidateId, offer });
+                    peerConnections[candidateId] = pc;
+                }
+            });
+
+            socket.on('offer', async ({ candidateId, offer }) => {
+                const pc = new RTCPeerConnection(CONFIG);
+                pc.onicecandidate = e => {
+                    if (e.candidate) socket.emit('iceCandidate', { candidateId, candidate: e.candidate });
+                };
+                pc.ontrack = e => {
+                    const audio = new Audio();
+                    audio.srcObject = e.streams[0];
+                    audio.autoplay = true;
+                };
+                await pc.setRemoteDescription(offer);
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                socket.emit('answer', { candidateId, answer });
+                peerConnections[candidateId] = pc;
+            });
+
+            socket.on('answer', async ({ candidateId, answer }) => {
+                const pc = peerConnections[candidateId];
+                if (pc) await pc.setRemoteDescription(answer);
+            });
+
+            socket.on('iceCandidate', async ({ candidateId, candidate }) => {
+                const pc = peerConnections[candidateId];
+                if (pc) await pc.addIceCandidate(candidate);
+            });
+
+            socket.on('userLeft', ({ candidateId }) => {
+                if (peerConnections[candidateId]) {
+                    peerConnections[candidateId].close();
+                    delete peerConnections[candidateId];
+                }
+            });
+        }
+
+        async function broadcastAudio() {
+            if (!localStream) return;
+            currentRoom.candidates.forEach(c => {
+                if (c.isSpeaking && c.id !== socket.id && !peerConnections[c.id]) {
+                    (async () => {
+                        const pc = new RTCPeerConnection(CONFIG);
+                        pc.onicecandidate = e => {
+                            if (e.candidate) socket.emit('iceCandidate', { candidateId: c.id, candidate: e.candidate });
+                        };
+                        pc.ontrack = e => {
+                            const audio = new Audio();
+                            audio.srcObject = e.streams[0];
+                            audio.autoplay = true;
+                        };
+                        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+                        const offer = await pc.createOffer();
+                        await pc.setLocalDescription(offer);
+                        socket.emit('offer', { candidateId: c.id, offer });
+                        peerConnections[c.id] = pc;
+                    })();
+                }
+            });
+        }
+
+        function stopBroadcastAudio() {
+            Object.values(peerConnections).forEach(pc => pc.close());
+            peerConnections = {};
+        }
+
+        function setupAudioVisualization() {
+            if (!localStream) return;
+            const audioContext = new AudioContext();
+            const analyser = audioContext.createAnalyser();
+            const source = audioContext.createMediaStreamSource(localStream);
+            source.connect(analyser);
+            analyser.fftSize = 256;
+
+            function animate() {
+                if (!localStream) return;
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                analyser.getByteFrequencyData(dataArray);
+                document.querySelectorAll('.audio-wave .bar').forEach((bar, i) => {
+                    bar.style.height = `${Math.max(5, dataArray[i * 4] / 2)}px`;
+                });
+                requestAnimationFrame(animate);
+            }
+            animate();
+        }
+
+        socket.on('roomUpdate', (room) => {
+            currentRoom = room;
+            if (room.status === 'waiting') {
+                updateWaitingRoom();
+            } else if (room.status === 'started' || room.status === 'finished') {
+                show('mainInterface');
+                updateCandidatesGrid();
+                updateQuestionPanel();
+                updateTimer();
+                updateControls();
+            }
+        });
+
+        socket.on('examStart', ({ question }) => {
+            show('mainInterface');
+            currentRoom.currentQuestion = question;
+            updateQuestionPanel();
+        });
+
+        socket.on('answerStart', ({ candidate, question }) => {
+            show('mainInterface');
+            currentRoom.currentQuestion = question;
+            updateQuestionPanel();
+            updateCandidatesGrid();
+            updateControls();
+            showNotification('答题开始', `${candidate} 开始答题`);
+        });
+
+        socket.on('answerEnd', ({ candidate, score }) => {
+            document.getElementById('resultPanel').classList.add('show');
+            document.getElementById('resultScore').textContent = score;
+            document.getElementById('aiFeedback').textContent = candidate.feedback;
+            document.getElementById('optimalAnswer').textContent = candidate.answer;
+            updateCandidatesGrid();
+        });
+
+        socket.on('timerUpdate', ({ timeLeft, duration }) => {
+            currentRoom.timeLeft = timeLeft;
+            currentRoom.timerDuration = duration;
+            updateTimer();
+        });
+
+        socket.on('timerEnd', () => {
+            stopAnswer();
+        });
+
+        socket.on('candidateChange', ({ nextCandidate, question }) => {
+            document.getElementById('resultPanel').classList.remove('show');
+            currentRoom.currentQuestion = question;
+            updateQuestionPanel();
+            updateCandidatesGrid();
+            updateControls();
+            showNotification('下一位', `${nextCandidate} 开始答题`);
+        });
+
+        socket.on('examEnd', ({ candidates }) => {
+            currentRoom.candidates = candidates;
+            show('endScreen');
+            document.getElementById('summaryGrid').innerHTML = candidates.map(c => `
+                <div class="summary-card">
+                    <div class="summary-name">${c.name}</div>
+                    <div class="result-score" style="font-size: 2rem;">${c.score}分</div>
+                </div>
+            `).join('');
+        });
+
+        socket.on('adminLeft', () => {
+            showNotification('管理员已离开');
+            setTimeout(() => location.reload(), 2000);
+        });
+
+        function showWaitingPanel() {
+            show('waitingPanel');
+            updateWaitingRoom();
+        }
+
+        function showAdminPanel() {
+            show('adminPanel');
+            loadQuestionList();
+        }
+
+        function showAdminTab(tab) {
+            document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.admin-section').forEach(s => s.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById(`tab-${tab}`).classList.add('active');
+        }
+
+        async function handleWordUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            try {
+                const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+                const lines = result.value.split('\n').filter(l => l.trim());
+                selectedWordQuestions = lines.map((l, i) => ({
+                    id: Date.now() + i, title: l.trim(), desc: '', selected: true
+                }));
+                document.getElementById('wordPreviewList').innerHTML = selectedWordQuestions.map((q, i) => `
+                    <div class="word-preview-item" onclick="toggleWordSelect(${i})" id="word-item-${i}">
+                        <input type="checkbox" ${q.selected ? 'checked' : ''}> ${q.title}
+                    </div>
+                `).join('');
+                document.getElementById('wordPreview').style.display = 'block';
+            } catch (e) {
+                showNotification('解析失败');
+            }
+        }
+
+        function toggleWordSelect(i) {
+            selectedWordQuestions[i].selected = !selectedWordQuestions[i].selected;
+            document.getElementById(`word-item-${i}`).classList.toggle('selected');
+        }
+
+        function importSelectedQuestions() {
+            const toImport = selectedWordQuestions.filter(q => q.selected);
+            socket.emit('importQuestions', { questions: toImport }, (res) => {
+                if (res.success) showNotification(`导入${res.count}道题目`);
+            });
+            closeWordPreview();
+        }
+
+        function closeWordPreview() {
+            document.getElementById('wordPreview').style.display = 'none';
+            document.getElementById('wordFile').value = '';
+            selectedWordQuestions = [];
+        }
+
+        function loadQuestionList() {
+            if (!currentRoom) return;
+            document.getElementById('questionList').innerHTML = currentRoom.questions.map((q, i) => `
+                <div class="question-item">
+                    <div class="question-item-info">
+                        <h4>${i + 1}. ${q.title}</h4>
+                        <p>${q.desc}</p>
+                    </div>
+                    <div class="question-item-actions">
+                        <button class="btn-sm btn-danger" onclick="deleteQuestion(${q.id})">删除</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function showAddQuestion() {
+            editingQuestionId = null;
+            document.getElementById('questionModalTitle').textContent = '添加题目';
+            document.getElementById('questionTitleInput').value = '';
+            document.getElementById('questionDescInput').value = '';
+            document.getElementById('questionModal').classList.add('show');
+        }
+
+        function saveQuestion() {
+            const title = document.getElementById('questionTitleInput').value.trim();
+            const desc = document.getElementById('questionDescInput').value.trim();
+            if (!title) return showNotification('请输入题目');
+            socket.emit('addQuestion', { title, desc }, (res) => {
+                if (res.success) {
+                    closeQuestionModal();
+                    loadQuestionList();
+                }
+            });
+        }
+
+        function deleteQuestion(id) {
+            if (!confirm('删除?')) return;
+            socket.emit('deleteQuestion', { questionId: id }, () => loadQuestionList());
+        }
+
+        function closeQuestionModal() {
+            document.getElementById('questionModal').classList.remove('show');
+        }
+
+        function toggleMute(candidateId) {
+            socket.emit('toggleMute', { candidateId });
+        }
+
+        function removeCandidate(candidateId) {
+            if (!confirm('移除该考生?')) return;
+            socket.emit('removeCandidate', { candidateId });
+        }
+
+        function saveSettings() {
+            showNotification('设置已保存');
+        }
+
+        function showNotification(title, message) {
+            const el = document.getElementById('notification');
+            document.getElementById('notificationTitle').textContent = title;
+            document.getElementById('notificationMessage').textContent = message || '';
+            el.classList.add('show');
+            setTimeout(() => el.classList.remove('show'), 3000);
+        }
+
+        show('startPanel');
+    </script>
+</body>
+</html>
