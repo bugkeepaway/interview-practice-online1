@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -12,21 +13,27 @@ const io = new Server(server, {
         methods: ["GET", "POST"]
     }
 });
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
 const DATA_FILE = path.join(__dirname, 'data.json');
+
 function loadData() {
     try {
         if (fs.existsSync(DATA_FILE)) {
             return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
         }
     } catch (e) {}
-    return { users: [], rooms: [], questions: [] };
+    return { users: [], rooms: [], questions: [], settings: {} };
 }
+
 function saveData(data) {
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
+
 let data = loadData();
+
 const DEFAULT_QUESTIONS = [
     { id: 1, title: "请自我介绍并谈谈你的优势", desc: "请用2-3分钟时间进行自我介绍，并阐述你为什么适合这个岗位。", image: "https://picsum.photos/600/400?random=1", category: "自我介绍" },
     { id: 2, title: "请描述你最大的缺点", desc: "谈谈你的不足之处，以及你正在如何改进。", image: "https://picsum.photos/600/400?random=2", category: "自我认知" },
@@ -37,15 +44,113 @@ const DEFAULT_QUESTIONS = [
     { id: 7, title: "你为什么离职", desc: "请说明上一份工作的离职原因。", image: "https://picsum.photos/600/400?random=7", category: "离职原因" },
     { id: 8, title: "你最大的成就是什么", desc: "请分享一个你最有成就感的事情。", image: "https://picsum.photos/600/400?random=8", category: "成就事件" }
 ];
+
+let openaiApiKey = data.settings?.openaiApiKey || '';
+let useDeepSeek = data.settings?.useDeepSeek || false;
+
+function setOpenAIApiKey(key, useDeep = false) {
+    openaiApiKey = key;
+    useDeepSeek = useDeep;
+    if (!data.settings) data.settings = {};
+    data.settings.openaiApiKey = key;
+    data.settings.useDeepSeek = useDeep;
+    saveData(data);
+}
+
+async function generateAIAnswer(question, transcribedText) {
+    if (!openaiApiKey) {
+        return getDefaultAnswer(question, transcribedText);
+    }
+    
+    const baseUrl = useDeepSeek ? 'https://api.deepseek.com' : 'https://api.openai.com';
+    const model = useDeepSeek ? 'deepseek-chat' : 'gpt-3.5-turbo';
+    
+    try {
+        const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${openaiApiKey}`
+            },
+            body: JSON.stringify({
+                model: model,
+                messages: [
+                    {
+                        role: 'system',
+                        content: '你是一位专业的面试官AI助手。请根据考生的回答给出评价和优化建议。'
+                    },
+                    {
+                        role: 'user',
+                        content: `面试题目：${question.title}\n题目描述：${question.desc}\n\n考生的回答：${transcribedText || '（考生还未开始答题）'}\n\n请给出：1. 对考生回答的评价（60字以内）2. 一个优化的参考答案（150字以内）\n\n请用JSON格式返回，格式如下：{"feedback":"评价内容","answer":"优化答案内容"}`
+                    }
+                ],
+                max_tokens: 500,
+                temperature: 0.7
+            })
+        });
+        
+        const data = await response.json();
+        if (data.choices && data.choices[0]) {
+            try {
+                const result = JSON.parse(data.choices[0].message.content);
+                return {
+                    feedback: result.feedback || getDefaultFeedback(),
+                    answer: result.answer || getDefaultAnswer(question)
+                };
+            } catch (e) {
+                return getDefaultAnswer(question, transcribedText);
+            }
+        }
+    } catch (e) {
+        console.error('AI API error:', e.message);
+    }
+    return getDefaultAnswer(question, transcribedText);
+}
+
+function getDefaultAnswer(question, transcribedText = '') {
+    const feedbacks = [
+        '表达清晰有条理，但可以更加自信一些。建议多使用具体案例来支撑你的观点。',
+        '整体表现不错，语言流畅。建议在回答问题时更加具体一些，多展示你的实际能力。',
+        '回答得很全面，但语速稍快。建议适当停顿，给面试官思考的时间。',
+        '思路清晰，回答有针对性。可以增加一些个人特色的表达，让回答更有记忆点。',
+        '内容充实，但缺乏与岗位的关联性。建议多强调与职位相关的能力和经验。',
+        '逻辑清晰，但情感表达稍显不足。建议增加一些真诚的情感表达。'
+    ];
+    const answers = [
+        `感谢面试官，我叫XXX，毕业于XX大学XX专业。在校期间，我积累了扎实的专业基础，曾获得XX奖项。毕业后我一直在从事相关工作，积累了丰富的项目经验。我认为自己最大的优势是学习能力强、善于沟通、具备团队协作精神。相信我的能力可以为贵公司创造价值。`,
+        `您好，我叫XXX。我是一名有着3年工作经验的XX专业人才。在上一家公司，我负责XX工作，成功完成了XX项目，取得了XX成果。我对贵公司的XX岗位非常感兴趣，希望能够加入团队共同发展。`,
+        `面试官好，我是XXX。我竞选这个岗位的优势主要有三点：第一，我具备扎实的专业技能；第二，我有丰富的项目经验；第三，我有良好的团队协作能力。我相信这些优势能够帮助我胜任这份工作。`
+    ];
+    return {
+        feedback: transcribedText ? feedbacks[Math.floor(Math.random() * feedbacks.length)] : '请开始答题',
+        answer: answers[Math.floor(Math.random() * answers.length)]
+    };
+}
+
+function getDefaultFeedback() {
+    const feedbacks = [
+        '表达清晰有条理，但可以更加自信一些。建议多使用具体案例来支撑你的观点。',
+        '整体表现不错，语言流畅。建议在回答问题时更加具体一些，多展示你的实际能力。',
+        '回答得很全面，但语速稍快。建议适当停顿，给面试官思考的时间。',
+        '思路清晰，回答有针对性。可以增加一些个人特色的表达，让回答更有记忆点。',
+        '内容充实，但缺乏与岗位的关联性。建议多强调与职位相关的能力和经验。',
+        '逻辑清晰，但情感表达稍显不足。建议增加一些真诚的情感表达。'
+    ];
+    return feedbacks[Math.floor(Math.random() * feedbacks.length)];
+}
+
 if (data.questions.length === 0) {
     data.questions = [...DEFAULT_QUESTIONS];
     saveData(data);
 }
+
 const rooms = new Map();
 const users = new Map();
+
 data.rooms.forEach(r => {
     rooms.set(r.id, { ...r, timer: null });
 });
+
 function createRoom() {
     const roomId = uuidv4().slice(0, 8).toUpperCase();
     const room = {
@@ -68,6 +173,7 @@ function createRoom() {
     rooms.set(roomId, room);
     return room;
 }
+
 app.post('/api/register', (req, res) => {
     const { username, password, nickname } = req.body;
     if (!username || !password) {
@@ -89,6 +195,7 @@ app.post('/api/register', (req, res) => {
     saveData(data);
     res.json({ success: true, user: { id: user.id, username: user.username, nickname: user.nickname, role: user.role } });
 });
+
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
     const user = data.users.find(u => u.username === username && u.password === password);
@@ -97,9 +204,11 @@ app.post('/api/login', (req, res) => {
     }
     res.json({ success: true, user: { id: user.id, username: user.username, nickname: user.nickname, role: user.role, stats: user.stats } });
 });
+
 app.get('/api/questions', (req, res) => {
     res.json({ success: true, questions: data.questions });
 });
+
 app.post('/api/questions', (req, res) => {
     const { title, desc, category } = req.body;
     if (!title) {
@@ -116,6 +225,7 @@ app.post('/api/questions', (req, res) => {
     saveData(data);
     res.json({ success: true, question });
 });
+
 app.delete('/api/questions/:id', (req, res) => {
     const id = parseInt(req.params.id);
     data.questions = data.questions.filter(q => q.id !== id);
@@ -125,6 +235,32 @@ app.delete('/api/questions/:id', (req, res) => {
     saveData(data);
     res.json({ success: true });
 });
+
+app.post('/api/settings', (req, res) => {
+    const { openaiApiKey, timerDuration, useDeepSeek } = req.body;
+    if (!data.settings) data.settings = {};
+    if (openaiApiKey) {
+        data.settings.openaiApiKey = openaiApiKey;
+        setOpenAIApiKey(openaiApiKey, useDeepSeek === true);
+    }
+    if (timerDuration) {
+        data.settings.timerDuration = timerDuration;
+    }
+    saveData(data);
+    res.json({ success: true });
+});
+
+app.get('/api/settings', (req, res) => {
+    res.json({ 
+        success: true, 
+        settings: {
+            openaiApiKey: openaiApiKey ? '***' : '',
+            timerDuration: data.settings?.timerDuration || 5,
+            useDeepSeek: useDeepSeek
+        }
+    });
+});
+
 app.get('/api/users', (req, res) => {
     const token = req.headers.authorization;
     const user = users.get(token);
@@ -133,8 +269,31 @@ app.get('/api/users', (req, res) => {
     }
     res.json({ success: true, users: data.users.map(u => ({ id: u.id, username: u.username, nickname: u.nickname, stats: u.stats, createdAt: u.createdAt })) });
 });
+
+app.get('/api/history', (req, res) => {
+    const token = req.headers.authorization || req.query.token;
+    let userId = req.query.userId;
+    
+    if (!userId && token) {
+        const user = Array.from(users.values()).find(u => u.id === token);
+        if (user) userId = user.id;
+    }
+    
+    if (!userId) {
+        return res.json({ success: false, error: '未授权' });
+    }
+    
+    const user = data.users.find(u => u.id === userId);
+    if (!user) {
+        return res.json({ success: false, error: '用户不存在' });
+    }
+    
+    res.json({ success: true, history: user.answerHistory || [] });
+});
+
 io.on('connection', (socket) => {
     console.log(`用户连接: ${socket.id}`);
+
     socket.on('auth', (token) => {
         if (token) {
             const userData = data.users.find(u => u.id === token);
@@ -143,6 +302,7 @@ io.on('connection', (socket) => {
             }
         }
     });
+
     socket.on('createRoom', (data, callback) => {
         const user = users.get(socket.id);
         if (!user) {
@@ -157,6 +317,7 @@ io.on('connection', (socket) => {
         callback({ success: true, room: serializeRoom(room), user: { id: user.id, username: user.username, nickname: user.nickname, role: user.role } });
         console.log(`房间创建: ${room.id} by ${user.nickname}`);
     });
+
     socket.on('joinRoom', (data, callback) => {
         const user = users.get(socket.id);
         if (!user) {
@@ -172,6 +333,7 @@ io.on('connection', (socket) => {
         if (room.candidates.length >= 20) {
             return callback({ success: false, error: '房间已满' });
         }
+
         const candidate = {
             id: socket.id,
             odUserId: user.id,
@@ -188,10 +350,12 @@ io.on('connection', (socket) => {
         room.candidates.push(candidate);
         user.roomId = room.id;
         socket.join(room.id);
+
         io.to(room.id).emit('roomUpdate', serializeRoom(room));
         callback({ success: true, room: serializeRoom(room) });
         console.log(`${user.nickname} 加入房间 ${room.id}`);
     });
+
     socket.on('startExam', (callback) => {
         const user = users.get(socket.id);
         if (!user || user.role !== 'admin') {
@@ -201,6 +365,7 @@ io.on('connection', (socket) => {
         if (room.candidates.length < 1) {
             return callback({ success: false, error: '没有考生' });
         }
+
         room.status = 'started';
         room.currentIndex = 0;
         room.questionIndex = 0;
@@ -212,11 +377,13 @@ io.on('connection', (socket) => {
             c.feedback = '';
             c.answer = '';
         });
+
         io.to(user.roomId).emit('roomUpdate', serializeRoom(room));
         io.to(user.roomId).emit('examStart', { question: room.currentQuestion });
         startTimer(room);
         callback({ success: true });
     });
+
     socket.on('startAnswer', (callback) => {
         const user = users.get(socket.id);
         if (!user) {
@@ -224,6 +391,7 @@ io.on('connection', (socket) => {
         }
         const room = rooms.get(user.roomId);
         const candidate = room.candidates.find(c => c.id === socket.id);
+
         if (!candidate) {
             return callback({ success: false, error: '未找到考生' });
         }
@@ -233,6 +401,7 @@ io.on('connection', (socket) => {
         if (candidate.status !== 'waiting' && candidate.status !== 'answering') {
             return callback({ success: false, error: '当前不是你的答题时间' });
         }
+
         room.candidates.forEach((c, i) => {
             if (i === room.currentIndex) {
                 c.status = 'answering';
@@ -242,51 +411,72 @@ io.on('connection', (socket) => {
                 c.isSpeaking = false;
             }
         });
+
         room.timeLeft = room.timerDuration;
         room.currentQuestion = room.questions[room.questionIndex];
         startTimer(room);
+
         io.to(user.roomId).emit('roomUpdate', serializeRoom(room));
         io.to(user.roomId).emit('answerStart', { candidate: candidate.name, question: room.currentQuestion });
         callback({ success: true, question: room.currentQuestion });
     });
-    socket.on('stopAnswer', (callback) => {
+
+    socket.on('stopAnswer', async (data, callback) => {
         const user = users.get(socket.id);
         if (!user) return;
         const room = rooms.get(user.roomId);
+        const transcribedText = data?.transcribedText || '';
+
         if (room.timer) {
             clearInterval(room.timer);
             room.timer = null;
         }
+
         const currentCandidate = room.candidates[room.currentIndex];
         if (currentCandidate) {
             currentCandidate.status = 'completed';
             currentCandidate.isSpeaking = false;
+
             const score = Math.floor(Math.random() * 30) + 70;
-            const feedbacks = [
-                '表达清晰有条理，但可以更加自信一些。建议多使用具体案例来支撑你的观点。',
-                '整体表现不错，语言流畅。建议在回答问题时更加具体一些，多展示你的实际能力。',
-                '回答得很全面，但语速稍快。建议适当停顿，给面试官思考的时间。',
-                '思路清晰，回答有针对性。可以增加一些个人特色的表达，让回答更有记忆点。',
-                '内容充实，但缺乏与岗位的关联性。建议多强调与职位相关的能力和经验。',
-                '逻辑清晰，但情感表达稍显不足。建议增加一些真诚的情感表达。'
-            ];
-            const answers = [
-                `感谢面试官，我叫${currentCandidate.name}，毕业于XX大学XX专业。在校期间，我积累了扎实的专业基础，曾获得XX奖项。毕业后我一直在从事相关工作，积累了丰富的项目经验。我认为自己最大的优势是学习能力强、善于沟通、具备团队协作精神。相信我的能力可以为贵公司创造价值。`,
-                `您好，我叫${currentCandidate.name}。我是一名有着3年工作经验的XX专业人才。在上一家公司，我负责XX工作，成功完成了XX项目，取得了XX成果。我对贵公司的XX岗位非常感兴趣，希望能够加入团队共同发展。`,
-                `面试官好，我是${currentCandidate.name}。我竞选这个岗位的优势主要有三点：第一，我具备扎实的专业技能；第二，我有丰富的项目经验；第三，我有良好的团队协作能力。我相信这些优势能够帮助我胜任这份工作。`
-            ];
+            
+            let aiResult;
+            if (transcribedText && transcribedText.length > 5) {
+                aiResult = await generateAIAnswer(room.currentQuestion, transcribedText);
+            } else {
+                aiResult = getDefaultAnswer(room.currentQuestion, transcribedText);
+            }
+
             currentCandidate.score = score;
-            currentCandidate.feedback = feedbacks[Math.floor(Math.random() * feedbacks.length)];
-            currentCandidate.answer = answers[Math.floor(Math.random() * answers.length)];
+            currentCandidate.feedback = aiResult.feedback;
+            currentCandidate.answer = aiResult.answer;
+            currentCandidate.transcribedText = transcribedText;
             currentCandidate.finishTime = Date.now();
+
             const odUser = data.users.find(u => u.id === currentCandidate.odUserId);
             if (odUser) {
                 odUser.stats = odUser.stats || { total: 0, passed: 0, avgScore: 0 };
                 odUser.stats.total++;
                 odUser.stats.avgScore = Math.round((odUser.stats.avgScore * (odUser.stats.total - 1) + score) / odUser.stats.total);
                 if (score >= 80) odUser.stats.passed++;
+                
+                if (!odUser.answerHistory) odUser.answerHistory = [];
+                odUser.answerHistory.unshift({
+                    question: room.currentQuestion.title,
+                    questionDesc: room.currentQuestion.desc,
+                    category: room.currentQuestion.category,
+                    transcribedText: transcribedText,
+                    score: score,
+                    feedback: aiResult.feedback,
+                    answer: aiResult.answer,
+                    time: Date.now()
+                });
+                if (odUser.answerHistory.length > 100) {
+                    odUser.answerHistory = odUser.answerHistory.slice(0, 100);
+                }
+                
                 saveData(data);
             }
+
             room.history.push({
                 candidateId: currentCandidate.id,
                 name: currentCandidate.name,
@@ -295,27 +485,34 @@ io.on('connection', (socket) => {
                 time: Date.now()
             });
         }
+
         io.to(user.roomId).emit('answerEnd', { candidate: currentCandidate, score: currentCandidate.score });
         io.to(user.roomId).emit('roomUpdate', serializeRoom(room));
+
         if (callback) callback({ success: true, candidate: currentCandidate });
     });
+
     socket.on('nextCandidate', (callback) => {
         const user = users.get(socket.id);
         if (!user || user.role !== 'admin') {
             return callback({ success: false, error: '只有管理员可以切换' });
         }
         const room = rooms.get(user.roomId);
+
         room.currentIndex++;
         room.questionIndex++;
+
         if (room.currentIndex >= room.candidates.length) {
             room.status = 'finished';
             io.to(user.roomId).emit('examEnd', { candidates: room.candidates, history: room.history });
             if (callback) callback({ success: true, finished: true });
             return;
         }
+
         if (room.questionIndex >= room.questions.length) {
             room.questionIndex = 0;
         }
+
         room.candidates.forEach((c, i) => {
             if (i === room.currentIndex) {
                 c.status = 'waiting';
@@ -326,6 +523,7 @@ io.on('connection', (socket) => {
                 c.status = 'waiting';
             }
         });
+
         room.currentQuestion = room.questions[room.questionIndex];
         room.timeLeft = room.timerDuration;
         
@@ -333,8 +531,10 @@ io.on('connection', (socket) => {
         io.to(user.roomId).emit('candidateChange', { nextCandidate: room.candidates[room.currentIndex].name, question: room.currentQuestion });
         
         startTimer(room);
+
         if (callback) callback({ success: true, finished: false });
     });
+
     socket.on('toggleMute', (data, callback) => {
         const user = users.get(socket.id);
         if (!user || user.role !== 'admin') {
@@ -348,6 +548,7 @@ io.on('connection', (socket) => {
             callback({ success: true, muted: candidate.muted });
         }
     });
+
     socket.on('removeCandidate', (data, callback) => {
         const user = users.get(socket.id);
         if (!user || user.role !== 'admin') {
@@ -364,6 +565,7 @@ io.on('connection', (socket) => {
             callback({ success: true });
         }
     });
+
     socket.on('addQuestion', (data, callback) => {
         const user = users.get(socket.id);
         if (!user || user.role !== 'admin') {
@@ -381,6 +583,7 @@ io.on('connection', (socket) => {
         io.to(user.roomId).emit('roomUpdate', serializeRoom(room));
         callback({ success: true });
     });
+
     socket.on('deleteQuestion', (data, callback) => {
         const user = users.get(socket.id);
         if (!user || user.role !== 'admin') {
@@ -391,6 +594,7 @@ io.on('connection', (socket) => {
         io.to(user.roomId).emit('roomUpdate', serializeRoom(room));
         callback({ success: true });
     });
+
     socket.on('getRoomInfo', (callback) => {
         const user = users.get(socket.id);
         if (!user) {
@@ -402,6 +606,7 @@ io.on('connection', (socket) => {
         }
         callback({ success: true, room: serializeRoom(room), user: user });
     });
+
     socket.on('getMyStats', (callback) => {
         const user = users.get(socket.id);
         if (!user) {
@@ -414,6 +619,7 @@ io.on('connection', (socket) => {
             callback({ success: true, stats: { total: 0, passed: 0, avgScore: 0 } });
         }
     });
+
     socket.on('disconnect', () => {
         const user = users.get(socket.id);
         if (user) {
@@ -439,12 +645,14 @@ io.on('connection', (socket) => {
         console.log(`用户断开: ${socket.id}`);
     });
 });
+
 function startTimer(room) {
     if (room.timer) clearInterval(room.timer);
     room.timeLeft = room.timerDuration;
     room.timer = setInterval(() => {
         room.timeLeft--;
         io.to(room.id).emit('timerUpdate', { timeLeft: room.timeLeft, duration: room.timerDuration });
+
         if (room.timeLeft <= 0) {
             clearInterval(room.timer);
             room.timer = null;
@@ -452,6 +660,7 @@ function startTimer(room) {
         }
     }, 1000);
 }
+
 function serializeRoom(room) {
     return {
         id: room.id,
@@ -467,6 +676,7 @@ function serializeRoom(room) {
         history: room.history || []
     };
 }
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`服务器运行在 http://localhost:${PORT}`);
