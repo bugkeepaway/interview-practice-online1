@@ -29,7 +29,12 @@ function loadData() {
 }
 
 function saveData(data) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+    try {
+        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+        console.log('Data saved successfully');
+    } catch (e) {
+        console.error('Error saving data:', e.message);
+    }
 }
 
 let data = loadData();
@@ -423,8 +428,16 @@ io.on('connection', (socket) => {
 
     socket.on('stopAnswer', async (data, callback) => {
         const user = users.get(socket.id);
-        if (!user) return;
+        if (!user || !user.roomId) {
+            if (callback) callback({ success: false, error: '未找到用户' });
+            return;
+        }
         const room = rooms.get(user.roomId);
+        if (!room) {
+            if (callback) callback({ success: false, error: '房间不存在' });
+            return;
+        }
+        
         const transcribedText = data?.transcribedText || '';
 
         if (room.timer) {
@@ -440,9 +453,14 @@ io.on('connection', (socket) => {
             const score = Math.floor(Math.random() * 30) + 70;
             
             let aiResult;
-            if (transcribedText && transcribedText.length > 5) {
-                aiResult = await generateAIAnswer(room.currentQuestion, transcribedText);
-            } else {
+            try {
+                if (transcribedText && transcribedText.length > 5) {
+                    aiResult = await generateAIAnswer(room.currentQuestion, transcribedText);
+                } else {
+                    aiResult = getDefaultAnswer(room.currentQuestion, transcribedText);
+                }
+            } catch (e) {
+                console.error('AI generation error:', e);
                 aiResult = getDefaultAnswer(room.currentQuestion, transcribedText);
             }
 
@@ -475,6 +493,8 @@ io.on('connection', (socket) => {
                 }
                 
                 saveData(data);
+            } else {
+                console.log('User not found for answer:', currentCandidate.odUserId);
             }
 
             room.history.push({
@@ -632,12 +652,15 @@ io.on('connection', (socket) => {
                 } else {
                     const index = room.candidates.findIndex(c => c.id === socket.id);
                     if (index > -1) {
-                        room.candidates.splice(index, 1);
-                        if (room.currentIndex >= room.candidates.length) {
-                            room.currentIndex = Math.max(0, room.candidates.length - 1);
+                        const candidate = room.candidates[index];
+                        if (room.status === 'waiting') {
+                            room.candidates.splice(index, 1);
+                            if (room.currentIndex >= room.candidates.length) {
+                                room.currentIndex = Math.max(0, room.candidates.length - 1);
+                            }
+                            io.to(room.id).emit('roomUpdate', serializeRoom(room));
                         }
                     }
-                    io.to(room.id).emit('roomUpdate', serializeRoom(room));
                 }
             }
             users.delete(socket.id);
@@ -682,4 +705,3 @@ server.listen(PORT, () => {
     console.log(`服务器运行在 http://localhost:${PORT}`);
     console.log(`公网访问: https://interview-practice-online1.onrender.com`);
 });
- 
